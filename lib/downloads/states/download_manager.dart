@@ -5,7 +5,6 @@ import 'package:bloc/bloc.dart';
 import 'package:dio/dio.dart';
 import 'package:downloadsfolder/downloadsfolder.dart';
 import 'package:easy_debounce/easy_throttle.dart';
-import 'package:ffmpeg_kit_flutter_full/ffmpeg_kit.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 import 'package:clipious/downloads/models/downloaded_video.dart';
 import 'package:clipious/extensions.dart';
@@ -229,20 +228,12 @@ class DownloadManagerCubit extends Cubit<DownloadManagerState> {
           return true;
         } else {
           onProgress(0, 1, downloadedVideo, step: 3, totalSteps: 3);
-          final session = await FFmpegKit.execute(
-              '-y -i $videoPath -i $audioPath -c:v copy -c:a copy $mediaPath');
-
-          final returnCode = await session.getReturnCode();
-
-          var success = returnCode?.isValueSuccess() ?? false;
-          if (success) {
-            onProgress(1, 1, downloadedVideo, step: 3, totalSteps: 3);
-          } else {
-            final logs = await session.getLogs();
-
-            onDownloadError("Couldn't merge audio and video ${logs.join("\n")}",
-                downloadedVideo);
-          }
+          // ffmpeg-kit was retired and its binaries removed from Maven, so this
+          // test build ships without it: merging separate video+audio is disabled.
+          var success = false;
+          onDownloadError(
+              "Downloading with separate audio isn't available in this test build",
+              downloadedVideo);
           return success;
         }
       } catch (e) {
