@@ -1,0 +1,78 @@
+name: Clipious Shield black-screen test builds
+
+# Builds two test APKs from Clipious 1.22.6 + the published-date fix
+# (alexmaras/clipious @ android-tv-black-screen):
+#   A = as-is (old Flutter 3.24.3, old Media3)
+#   B = same, but just_audio 0.9.44 / audio_session 0.1.24, which pulls
+#       the video player onto Media3 1.4.1 like Clipious 1.22.7+
+# Each installs alongside the official app under its own name.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [tv-bisect]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [A, B]
+    env:
+      ANDROID_KEY_FILE: /tmp/key.properties
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Signing key (throwaway)
+        run: |
+          keytool -genkeypair -keystore /tmp/keystore.jks -alias test \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass android -keypass android -dname "CN=Clipious Test"
+          printf 'storeFile=/tmp/keystore.jks\nstorePassword=android\nkeyPassword=android\nkeyAlias=test\n' > "$ANDROID_KEY_FILE"
+
+      - name: Give variant ${{ matrix.variant }} its own app ID and name
+        run: |
+          V=${{ matrix.variant }}
+          v=$(echo "$V" | tr 'A-Z' 'a-z')
+          sed -i "s|applicationId \"com.github.lamarios.clipious\"|applicationId \"com.github.lamarios.clipious\"\n        applicationIdSuffix \".test$v\"|" android/app/build.gradle
+          sed -i "s|android:label=\"Clipious\"|android:label=\"Clipious Test $V\"|" android/app/src/main/AndroidManifest.xml
+          grep -n "applicationIdSuffix" android/app/build.gradle
+          grep -n "Clipious Test" android/app/src/main/AndroidManifest.xml
+
+      - name: Variant B - newer audio libs (Media3 1.4.1)
+        if: matrix.variant == 'B'
+        run: |
+          sed -i 's|^  just_audio: 0.9.42|  just_audio: 0.9.44|; s|^  audio_session: 0.1.21|  audio_session: 0.1.24|' pubspec.yaml
+          grep -nE "^  (just_audio|audio_session):" pubspec.yaml
+
+      - name: Build
+        run: |
+          set -e
+          F=./submodules/flutter/bin/flutter
+          $F config --no-analytics
+          $F --version
+          $F pub get
+          grep -A6 "^  just_audio:" pubspec.lock | grep version
+          $F pub run flutter_native_splash:create
+          $F build apk --release --split-per-abi
+          mkdir -p out
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk out/clipious-test-${{ matrix.variant }}-arm64.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk out/clipious-test-${{ matrix.variant }}-armv7.apk
+
+      - name: Show which Media3 / ExoPlayer ended up in the APK
+        run: |
+          unzip -l out/clipious-test-${{ matrix.variant }}-arm64.apk | grep -iE "media3|exoplayer" | head -20 || true
+          (cd android && ./gradlew -q :app:dependencies --configuration releaseRuntimeClasspath 2>/dev/null | grep -E "androidx.media3:media3-exoplayer:|com.google.android.exoplayer:exoplayer-core:" | sort -u) || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clipious-test-${{ matrix.variant }}
+          path: out/*.apk
