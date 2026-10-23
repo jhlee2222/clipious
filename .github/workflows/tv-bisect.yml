@@ -22,11 +22,16 @@ jobs:
     env:
       ANDROID_KEY_FILE: /tmp/key.properties
     steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: true
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      # Full (non-shallow) clone of the bundled Flutter SDK: Flutter reads its
+      # own version from git tags, and a shallow clone reports 0.0.0-unknown.
+      - name: Fetch Flutter SDK submodule
+        run: |
+          git submodule update --init
+          git -C submodules/flutter describe --tags || true
+
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -59,6 +64,7 @@ jobs:
           F=./submodules/flutter/bin/flutter
           $F config --no-analytics
           $F --version
+          $F doctor -v || true
           $F pub get
           grep -A6 "^  just_audio:" pubspec.lock | grep version
           $F pub run flutter_native_splash:create
@@ -72,7 +78,7 @@ jobs:
           unzip -l out/clipious-test-${{ matrix.variant }}-arm64.apk | grep -iE "media3|exoplayer" | head -20 || true
           (cd android && ./gradlew -q :app:dependencies --configuration releaseRuntimeClasspath 2>/dev/null | grep -E "androidx.media3:media3-exoplayer:|com.google.android.exoplayer:exoplayer-core:" | sort -u) || true
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: clipious-test-${{ matrix.variant }}
           path: out/*.apk
